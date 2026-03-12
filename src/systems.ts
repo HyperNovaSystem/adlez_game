@@ -8,6 +8,7 @@ import {
   ITEM_BOMB,
 } from './components.js';
 import { isTileSolid, loadRoom } from './map.js';
+import type { WorldLike } from '@nova/core';
 import type { RoomMapData, GameStateData, InputData } from './components.js';
 
 // ─── Helper: tile collision check ───
@@ -168,6 +169,10 @@ export const SwordLifetimeSystem = defineSystem({
     for (const eid of entities) {
       Sword.lifetime[eid] -= dt;
       if (Sword.lifetime[eid] <= 0) {
+        // Clean up hit tracking for this sword
+        for (const key of swordHitPairs) {
+          if (key.startsWith(`${eid}:`)) swordHitPairs.delete(key);
+        }
         world.destroy(eid);
       }
     }
@@ -176,20 +181,27 @@ export const SwordLifetimeSystem = defineSystem({
 
 // ─── Sword-Enemy Collision System ───
 
+// Track which (sword, enemy) pairs have already dealt damage this swing.
+// Persists across ticks so a sword only damages each enemy once during its lifetime.
+const swordHitPairs = new Set<string>();
+
 export const SwordHitSystem = defineSystem({
   name: 'SwordHit',
-  query: query(Position, Sword),
+  query: query(Position, Sword, Renderable),
   execute({ entities, world, events }) {
     const enemies = world.query(query(Position, Enemy, Health).not(Dead));
-    const swordHalfW = 7;
-    const swordHalfH = 7;
 
     for (const swordEid of entities) {
       const sx = Position.x[swordEid];
       const sy = Position.y[swordEid];
       const damage = Sword.damage[swordEid];
+      const swordHalfW = Renderable.width[swordEid] / 2;
+      const swordHalfH = Renderable.height[swordEid] / 2;
 
       for (const enemyEid of enemies) {
+        const pairKey = `${swordEid}:${enemyEid}`;
+        if (swordHitPairs.has(pairKey)) continue;
+
         const ex = Position.x[enemyEid];
         const ey = Position.y[enemyEid];
         const def = ENEMY_DEFS[Enemy.enemyType[enemyEid]];
@@ -198,6 +210,7 @@ export const SwordHitSystem = defineSystem({
 
         if (boxOverlap(sx, sy, swordHalfW, swordHalfH, ex, ey, ehw, ehh)) {
           Health.current[enemyEid] -= damage;
+          swordHitPairs.add(pairKey);
           events.emit(DamageEvent, {
             target: enemyEid,
             amount: damage,
@@ -213,7 +226,7 @@ export const SwordHitSystem = defineSystem({
 
 export const EnemyAISystem = defineSystem({
   name: 'EnemyAI',
-  query: query(Position, Enemy, Health).not(Dead),
+  query: query(Position, Velocity, Enemy, Health).not(Dead),
   execute({ entities, dt, world, resources }) {
     const gameState = resources.get(GameState);
     if (gameState.phase !== 'playing') return;
@@ -468,7 +481,7 @@ export const ProjectileMovementSystem = defineSystem({
 
 export const DeathSystem = defineSystem({
   name: 'Death',
-  query: query(Health, Enemy).not(Dead),
+  query: query(Position, Health, Enemy).not(Dead),
   execute({ entities, world, events }) {
     for (const eid of entities) {
       if (Health.current[eid] <= 0) {
@@ -682,6 +695,24 @@ export const RoomClearSystem = defineSystem({
     const aliveEnemies = world.query(query(Enemy, Health).not(Dead));
     if (aliveEnemies.length === 0 && !gameState.clearedRooms.has(gameState.currentRoom)) {
       gameState.clearedRooms.add(gameState.currentRoom);
+
+      // Spawn triforce items that were gated on room clear
+      const map = resources.get(RoomMap);
+      const room = map.rooms[gameState.currentRoom];
+      const ts = map.tileSize;
+      for (const spawn of room.items) {
+        if (spawn.type !== ITEM_TRIFORCE) continue;
+        if (gameState.triforceShards >= gameState.totalTriforceShards) continue;
+        const eid = world.spawn();
+        world.addComponent(eid, Position, {
+          x: spawn.tileX * ts + ts / 2,
+          y: spawn.tileY * ts + ts / 2,
+        });
+        world.addComponent(eid, Item, { itemType: ITEM_TRIFORCE, value: spawn.value });
+        world.addComponent(eid, Renderable, {
+          width: 14, height: 14, color: 0xFFDD00, shape: 2,
+        });
+      }
     }
   },
 });
@@ -689,7 +720,7 @@ export const RoomClearSystem = defineSystem({
 // ─── Spawn room entities helper ───
 
 export function spawnRoomEntities(
-  world: any,
+  world: WorldLike,
   map: RoomMapData,
   roomIndex: number,
   gameState: GameStateData,
@@ -732,11 +763,17 @@ export function spawnRoomEntities(
     }
   }
 
-  // Spawn items (only if room not cleared, except triforce which always appears in cleared boss room)
+  // Spawn items: regular items only in uncleared rooms, triforce only after room is cleared
   for (const spawn of room.items) {
-    if (isCleared && spawn.type !== ITEM_TRIFORCE) continue;
-    // Don't spawn triforce in boss room if already collected
-    if (spawn.type === ITEM_TRIFORCE && gameState.triforceShards >= gameState.totalTriforceShards) continue;
+    if (spawn.type === ITEM_TRIFORCE) {
+      // Triforce only appears after all enemies in the room are defeated
+      if (!isCleared) continue;
+      // Don't spawn if already collected
+      if (gameState.triforceShards >= gameState.totalTriforceShards) continue;
+    } else {
+      // Regular items don't respawn in cleared rooms
+      if (isCleared) continue;
+    }
 
     const eid = world.spawn();
     world.addComponent(eid, Position, {

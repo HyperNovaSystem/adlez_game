@@ -124,7 +124,7 @@ export class AdlezRenderer {
 
     // Draw overlays
     if (gameState.phase === 'gameover') {
-      this.drawOverlay(ctx, canvasW, canvasH, 'GAME OVER', '#FF4444', 'Press R to restart');
+      this.drawOverlay(ctx, canvasW, canvasH, 'GAME OVER', '#FF4444', 'You have fallen...');
     } else if (gameState.phase === 'victory') {
       this.drawOverlay(ctx, canvasW, canvasH, 'VICTORY!', '#FFD700', 'You collected the Triforce!');
     } else if (gameState.phase === 'title') {

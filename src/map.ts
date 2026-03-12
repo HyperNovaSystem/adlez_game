@@ -276,7 +276,7 @@ function createRoom6_Dungeon1(): RoomDef {
       { type: 3, tileX: 12, tileY: 3 },   // keese
     ],
     items: [
-      { type: ITEM_KEY, tileX: 7, tileY: 5, value: 1 },
+      { type: ITEM_KEY, tileX: 8, tileY: 6, value: 1 },
     ],
     doors: [
       // Top exit -> Room 4
