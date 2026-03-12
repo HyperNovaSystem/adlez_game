@@ -1,6 +1,6 @@
 # Adlez Game - HyperNova Engine Findings
 
-Deficiencies, gaps, and observations encountered while building a Zelda-clone
+Deficiencies, gaps, and observations encountered while building a top-down RPG
 ("Adlez") on top of the HyperNova ECS engine (v1.0.0).
 
 ---
